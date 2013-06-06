@@ -1,0 +1,292 @@
+<html>
+ <head>
+
+ <style type="text/css">
+body {background-color:white; margin:0px; min-height:100%; height:auto !important; height:100%; font-family:helvetica;}
+#header {background-color:black; width:100%; height:30px; line-height:30px; padding-left:5px;}
+#headline {color:white; font-weight:bold; font-size:18pt;}
+#form-container {background-color:white; width:200px; position:absolute;top 20px;border-left:solid 1px black; padding-top:5px; padding-left:5px; margin-right:5px; min-height:100%; height:auto !important; height:100%;}
+input#q {width:134px;}
+.searchbar {line-height:20px; padding-bottom: 5px; border-bottom:solid 1px gray;}
+.handle {background-color:#F8F8F8; line-height: 20px;  border-bottom:solid 1px gray; padding-top:4px; padding-bottom:3px;}
+.row {background-color:white; line-height: 16px; border-bottom:solid 1px gray; padding-top:4px; padding-right:4px;}
+.label {}
+.value {float:right;}
+#results {background-color:white; width:100%; padding-left:5px; padding-top:5px; border-left:solid 1px black; border-right: solid 1px black; position:absolute; top:30px;left:206px; min-height:100%; height:auto !important; height:100%;}
+#status {display:block; line-height:28px;}
+.more {line-height:28px;}
+.cite {color:black; font-weight:bold; text-decoration:none;}
+.cite:hover {color:red}
+.kwic {display:block;}
+.subcite {color:black; text-decoration:none; font-family:serif; font-size:12pt;}
+.subcite:hover {color:red;}
+.context {font-family:"Warnock Pro";}
+.context em {color:#DD0000; font-style:normal;}
+#footer {clear:both;}
+ </style>
+
+ <script src="jquery-1.8.2.min.js"></script>
+ <script>
+ var universal_params = ["collection","type"];
+ var universal_param_selectors;
+ var endpoint;
+ var param_map = 
+   {"perseus":["title","author"],
+    "phi":["identifier","source","place"],
+    "ddbdp":["ddbdp_series","display_date","place","title"]};
+ var current_params = [];
+
+function format_cite(r) {
+    var href;
+    if (r.collection == "perseus") {        
+        href = "http://data.perseus.org/citations/" + r.urn
+        if (r.passage != undefined) {
+            return "<span class='cite'>" + r.author + ", " + r.title + " " + r.psg + "</span>"
+        }
+        return "<a class='cite' href='"+href+"'>" + r.author + ", " + r.title + "</a>"; 
+    }
+    else if (r.collection == "phi") {
+        href = "http://x.epigraphy.packhum.org/text/" + r.id.replace("urn:cts:phi:inscriptions.phi","").replace(".1","")
+        var locations = r.place.split(" : ");
+        var site = locations[locations.length - 1];
+        return "<a class='cite' href='"+href+"'>" + r.identifier + " - " + site + "</a>";
+    }
+    else if (r.collection == "ddbdp") {
+        href = r.identifier;
+        return "<a class='cite' href='"+href+"'>" + r.ddbdp_series + " " + r.ddbdp_volume + " " + r.ddbdp_item + " - " + r.nome + "</a>";
+    }
+    return "<a class='cite'>" + r.id + "</a>";
+}
+
+function build_qs() {
+    var q = $("#q").val();
+    if (q == "") {
+      q = "*:*";
+    }
+    var qs = "?q=" + encodeURIComponent(q);
+    
+    $("#selectors > div" ).each(function(i,element){
+      var sel_name = $("div.handle",$(element)).attr("id");
+      console.log(sel_name)
+      var selected = $("input[type=checkbox]:checked",$(element))
+      if (selected.length > 0) {
+        selected_vals = [];
+        selected.each(function(n,checkbox){
+          selected_vals.push(encodeURIComponent($(checkbox).val()));
+        });
+        qs += " AND " + sel_name + ":(\"" + selected_vals.join("\" OR \"") + "\")";
+      }
+    });
+    return qs;
+}
+
+ function query(q_page) {
+    var start = typeof q_page == "undefined" ? 0 : q_page * 100;
+    var qs = build_qs();    
+    console.log(q_page);
+    console.log(start);
+    qs += "&start="+start;
+    qs += "&df=all&wt=json&rows=100&&hl=true&hl.fl=text&sort=id asc";
+    console.log(qs);
+    console.log(endpoint+qs);
+    var filtered = 0;
+    $.get(endpoint+qs,function(data) {
+        console.log(data);
+        var r_docs = data.response.docs;
+        console.log(data.response.numFound);
+        var current_parent = "";
+        $("#results").empty()
+        $("#results").append("<span id='status'>" + data.response.numFound + " results.</span>");   
+        console.log(data.response.docs);
+        var text_matches = 0;
+        for (res in data.response.docs) {
+          var r = data.response.docs[res];
+          var partOf = r.partOf ? r.partOf[0] : "";          
+          var cite = "";
+          var subcite = "";
+          console.log(partOf);
+          console.log(current_parent);          
+          if (r.type == "passage") {
+            if (current_parent != partOf) {
+              current_parent = partOf;                
+              var fake_cite = format_cite(r);
+              $("#results").append("<span class='kwic'><span class='cite'>"+fake_cite+"</span></span>");
+            }
+          }
+          else {
+            cite = format_cite(r);
+            
+            current_parent = r.id;
+          }
+          var context = "";
+          var partOf = r.partOf;
+          if (data.highlighting[r.id].text) {
+            text_matches += 1;
+            for (occ in data.highlighting[r.id].text) {
+                var sub_href = "http://data.perseus.org/citations/" + r.id;
+                subcite = r.partOf ? "<a href='"+sub_href+"' class='subcite'>"+r.id.replace(r.partOf+":","")+" :</a>" : "";
+                context += "<span class='context'>" + data.highlighting[r.id].text[occ] + "</span>";
+            }
+          }
+          if (cite && context) { cite += " : "; }
+          $("#results").append("<div class='results'>"+subcite+" "+cite +" "+ context+"</div>")
+          if (!(context || cite)) {
+            filtered += 1;
+          }
+          // plug in collection-appropriate metadata formatter here.
+        }
+        console.log("checkbox?");
+        console.log($("#textcheck").prop("checked") );
+            
+        if (text_matches == 0 && $("#textcheck").prop("checked")) {
+            $("#textcheck").prop("checked",false);
+            query();
+            return;
+        }
+        
+        $("#results").append("<div class='more'>More results:</div>");
+        var pagen = 0;
+        for (i = 0; i < data.response.numFound; i += 100) {
+            console.log(pagen);
+            var page_link = $("<a n='"+pagen+"' href='foo'>").text(pagen);
+            page_link.on("click",function(){
+                var p = $(this).attr("n");
+                query(p);
+                return false;
+            });            
+            $(".more").append(page_link);
+            $(".more").append(" ");
+            pagen += 1;
+        }
+        // Pages here.
+        
+    },"json");
+    return false; 
+ }
+
+ function update_facets() {
+    $("#selectors").empty();
+    $("#selectors").append(universal_param_selectors);
+    var selected_collections = $("#selectors input[type=checkbox][name=collection]:checked");    
+    var params = {};
+    // a RIDICULUOUS amount of code to intersect two damned lists.
+    selected_collections.each(function(e){
+     p_set = param_map[$(selected_collections[e]).val()];
+     for (n in p_set) {
+       console.log(params);
+       console.log(p_set);
+       if (params[p_set[n]] == undefined) {
+         params[p_set[n]] = 1; 
+       } else {
+         params[p_set[n]] += 1;
+       }
+       
+     }
+     current_params = {};
+//     console.log(current_params);     
+     for (key in params) {
+       if (params[key] == selected_collections.length) {
+         current_params[key] = true;
+       }
+     }
+//     console.log(current_params);
+     for (key in current_params) {
+      $("#selectors").append("<div class='facet'><div class='handle' id='"+key+"'>"+key+":</div></div>");
+     }
+     var fqs = build_qs() + "&fq=type:work&rows=0&facet=true&wt=json";
+     var all_params = [].concat(universal_params);
+     for (key in current_params) {
+        all_params.push(key);
+     }
+//     console.log(all_params);
+     for (n in all_params) {
+       fqs += "&facet.field=" + all_params[n];
+     }
+     console.log(fqs);
+     $.get(endpoint+fqs,function(data){
+       console.log("facet response");
+       console.log(data);
+       for (field in data.facet_counts.facet_fields) {
+           if (field != "collection" && field != "type") {
+               console.log(field);
+               var facet_count_data = data.facet_counts.facet_fields[field];
+               var facet_counts = {};
+               console.log(facet_count_data);
+               for (i = 0; i < facet_count_data.length; i += 2) {
+                  var k = facet_count_data[i];
+                  var v = facet_count_data[i+1];
+                  facet_counts[k] = v;
+                  if (v > 0) {
+                      $(".handle#"+field).after("<div class='row'><input type='checkbox' name='"+field+"' value='"+k+"'/><span class='label'>" + k + "</span> : <span class='value'>" + v + "</span></div>");
+                  }
+               }           
+           }
+       }
+       query(0);
+     },"json");
+    });
+    
+ }
+  $(document).ready(function() {
+    endpoint = $("#searchform").attr("action");
+    universal_param_selectors = $("#selectors > div");
+    $("#selectors").on("click",".row",function(ev){
+     console.log(this);
+     var my_checkbox = $(this).children("input[type=checkbox]");
+     console.log(my_checkbox);
+     if (my_checkbox.prop("checked")) {
+        my_checkbox.prop("checked",false);
+     } else {
+        my_checkbox.prop("checked",true);
+     }
+     console.log(my_checkbox.attr("name"));
+     if (my_checkbox.attr("name") == "collection") {
+       update_facets();
+     }
+     else if (my_checkbox.attr("name") != "type") {
+       query(0);
+     }
+     console.log(my_checkbox.prop("checked"));
+     return false;
+    });
+    $("#searchform").submit(function() {
+     query(0);
+     return false;
+    });
+  });
+ </script>
+ </head>
+ <body>
+  <div id="header">
+   <span id="headline">Greek.info</span>
+  </div>
+  <div id="form-container">
+  <form id="searchform" action="http://dev.papyri.info/idg/select/">
+   <div class="searchbar">
+   <input name="q" type="text" id="q">   <input type="submit" />
+<br/> 
+   </div>
+   <div id="selectors">
+    <div>
+     <div class="handle" id="type">Type:</div>
+     <div class="row"><input id="textcheck" type="checkbox" name="type" value="passage" checked="true" >Passage </input></div>
+     <div class="row"><input id="workcheck" type="checkbox" name="type" value="work" checked="true" >Work </input></div>
+     <div class="row"><input type="checkbox" name="type" value="annotation" checked="" >Annotations </input></div>
+    </div>
+    <div>
+     <div class="handle" id="collection">Collection:</div>
+     <div class="row"><input type="checkbox" name="collection" value="ddbdp" checked="true" />DDbDP</div>
+     <div class="row"><input type="checkbox" name="collection" value="phi" checked="true" />PHI Inscriptions</div>
+     <div class="row"><input type="checkbox" name="collection" value="perseus" checked="true" />Perseus</div>
+    </div>
+   </div>
+
+  </form>
+  </div>
+
+   <div id="results">
+
+   </div>
+   <div class="footer">&nbsp;</div>
+ </body>
+</html>
